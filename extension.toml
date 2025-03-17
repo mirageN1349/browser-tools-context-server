@@ -3,7 +3,7 @@ name = "BrowserTools Context Server"
 description = "Model Context Server for BrowserTools"
 version = "0.0.1"
 schema_version = 1
-authors = ["Ivan Samarin <miragen1349@gmail.com>"]
+authors = ["Vanya Samarin <desertirpipi@gmail.com>"]
 repository = "https://github.com/mirageN1349/browser-tools-context-server"
 
 [context_servers.browser-tools-context-server]
