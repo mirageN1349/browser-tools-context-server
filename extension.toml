@@ -1,0 +1,22 @@
+id = "browser-tools-context-server"
+name = "BrowserTools Context Server"
+description = "Model Context Server for BrowserTools"
+version = "0.0.1"
+schema_version = 1
+authors = ["Ivan Samarin <ivan.samarin.work@gmail.com>"]
+repository = "https://github.com/mirageN1349/browser-tools-context-server"
+
+[context_servers.browser-tools-context-server]
+name = "BrowserTools Context Server"
+
+[slash_commands.browser-capture]
+description = "Capture browser data (screenshot, logs, DOM elements)"
+requires_argument = true
+
+[slash_commands.browser-audit]
+description = "Run browser audits (accessibility, performance, SEO, best practices)"
+requires_argument = true
+
+[slash_commands.browser-debug]
+description = "Start browser debugger mode"
+requires_argument = true
