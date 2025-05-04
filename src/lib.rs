@@ -1,15 +1,17 @@
+use schemars::JsonSchema;
 use serde::Deserialize;
 use zed::settings::ContextServerSettings;
 use zed_extension_api::{
-    self as zed, http_client, serde_json, Command, ContextServerId, Project, Result, SlashCommand,
-    SlashCommandArgumentCompletion, SlashCommandOutput, SlashCommandOutputSection, Worktree,
+    self as zed, http_client, serde_json, Command, ContextServerConfiguration, ContextServerId,
+    Project, Result, SlashCommand, SlashCommandArgumentCompletion, SlashCommandOutput,
+    SlashCommandOutputSection, Worktree,
 };
 
 const DEFAULT_PORT: u16 = 3025;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_BROWSERTOOLS_NPX_COMMAND: &str = "@agentdeskai/browser-tools-server@1.2.0";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct BrowserToolsSettings {
     #[serde(default = "default_port")]
     port: u16,
@@ -84,6 +86,24 @@ impl zed::Extension for BrowserToolsExtension {
         })
     }
 
+    fn context_server_configuration(
+        &mut self,
+        _context_server_id: &ContextServerId,
+        _project: &Project,
+    ) -> Result<Option<ContextServerConfiguration>> {
+        let installation_instructions =
+            include_str!("../configuration/installation_instructions.md").to_string();
+        let default_settings = include_str!("../configuration/default_settings.jsonc").to_string();
+        let settings_schema = serde_json::to_string(&schemars::schema_for!(BrowserToolsSettings))
+            .map_err(|e| e.to_string())?;
+
+        Ok(Some(ContextServerConfiguration {
+            installation_instructions,
+            default_settings,
+            settings_schema,
+        }))
+    }
+
     fn complete_slash_command_argument(
         &self,
         command: SlashCommand,
@@ -107,9 +127,7 @@ impl zed::Extension for BrowserToolsExtension {
                 create_completion("NextJS", "nextjs"),
                 create_completion("Run All Audits", "all"),
             ]),
-            "browser-debug" => Ok(vec![
-                create_completion("Start Debugger Mode", "start"),
-            ]),
+            "browser-debug" => Ok(vec![create_completion("Start Debugger Mode", "start")]),
             command => Err(format!("unknown slash command: \"{command}\"")),
         }
     }
@@ -157,51 +175,110 @@ fn get_current_timestamp() -> i64 {
         .as_millis() as i64
 }
 
-fn get_api_params(command_name: &str, arg: &str) -> Result<(String, String, serde_json::Value), String> {
+fn get_api_params(
+    command_name: &str,
+    arg: &str,
+) -> Result<(String, String, serde_json::Value), String> {
     let timestamp = get_current_timestamp();
 
     match (command_name, arg) {
-        ("browser-capture", "screenshot") => Ok(("capture-screenshot".to_string(), "POST".to_string(), serde_json::json!({}))),
-        ("browser-capture", "logs") => Ok(("console-logs".to_string(), "GET".to_string(), serde_json::json!({}))),
-        ("browser-capture", "errors") => Ok(("console-errors".to_string(), "GET".to_string(), serde_json::json!({}))),
-        ("browser-capture", "network") => Ok(("network-success".to_string(), "GET".to_string(), serde_json::json!({}))),
-        ("browser-capture", "network-errors") => Ok(("network-errors".to_string(), "GET".to_string(), serde_json::json!({}))),
-        ("browser-capture", "clear") => Ok(("wipelogs".to_string(), "POST".to_string(), serde_json::json!({}))),
-        ("browser-capture", "element") => Ok(("selected-element".to_string(), "GET".to_string(), serde_json::json!({}))),
+        ("browser-capture", "screenshot") => Ok((
+            "capture-screenshot".to_string(),
+            "POST".to_string(),
+            serde_json::json!({}),
+        )),
+        ("browser-capture", "logs") => Ok((
+            "console-logs".to_string(),
+            "GET".to_string(),
+            serde_json::json!({}),
+        )),
+        ("browser-capture", "errors") => Ok((
+            "console-errors".to_string(),
+            "GET".to_string(),
+            serde_json::json!({}),
+        )),
+        ("browser-capture", "network") => Ok((
+            "network-success".to_string(),
+            "GET".to_string(),
+            serde_json::json!({}),
+        )),
+        ("browser-capture", "network-errors") => Ok((
+            "network-errors".to_string(),
+            "GET".to_string(),
+            serde_json::json!({}),
+        )),
+        ("browser-capture", "clear") => Ok((
+            "wipelogs".to_string(),
+            "POST".to_string(),
+            serde_json::json!({}),
+        )),
+        ("browser-capture", "element") => Ok((
+            "selected-element".to_string(),
+            "GET".to_string(),
+            serde_json::json!({}),
+        )),
 
-        ("browser-audit", "accessibility") => Ok(("accessibility-audit".to_string(), "POST".to_string(), serde_json::json!({
-            "category": "accessibility",
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
-        ("browser-audit", "performance") => Ok(("performance-audit".to_string(), "POST".to_string(), serde_json::json!({
-            "category": "performance",
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
-        ("browser-audit", "seo") => Ok(("seo-audit".to_string(), "POST".to_string(), serde_json::json!({
-            "category": "seo",
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
-        ("browser-audit", "best-practices") => Ok(("best-practices-audit".to_string(), "POST".to_string(), serde_json::json!({
-            "category": "best-practices",
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
-        ("browser-audit", "nextjs") => Ok(("nextjs-audit".to_string(), "POST".to_string(), serde_json::json!({
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
-        ("browser-audit", "all") => Ok(("audit-all".to_string(), "POST".to_string(), serde_json::json!({
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
+        ("browser-audit", "accessibility") => Ok((
+            "accessibility-audit".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "category": "accessibility",
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
+        ("browser-audit", "performance") => Ok((
+            "performance-audit".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "category": "performance",
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
+        ("browser-audit", "seo") => Ok((
+            "seo-audit".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "category": "seo",
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
+        ("browser-audit", "best-practices") => Ok((
+            "best-practices-audit".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "category": "best-practices",
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
+        ("browser-audit", "nextjs") => Ok((
+            "nextjs-audit".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
+        ("browser-audit", "all") => Ok((
+            "audit-all".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
 
-        ("browser-debug", "start") => Ok(("debug-mode".to_string(), "POST".to_string(), serde_json::json!({
-            "source": "zed_extension",
-            "timestamp": timestamp
-        }))),
+        ("browser-debug", "start") => Ok((
+            "debug-mode".to_string(),
+            "POST".to_string(),
+            serde_json::json!({
+                "source": "zed_extension",
+                "timestamp": timestamp
+            }),
+        )),
 
         (command, arg) => Err(format!("Unknown command or argument: {command} {arg}")),
     }
@@ -223,7 +300,7 @@ fn get_section_label<'a>(command_name: &'a str, arg: &'a str) -> &'a str {
         ("browser-audit", "nextjs") => "NextJS Audit",
         ("browser-audit", "all") => "All Audits",
         ("browser-debug", "start") => "Debugger Mode",
-        _ => "Browser Tools"
+        _ => "Browser Tools",
     }
 }
 
@@ -277,18 +354,25 @@ fn process_api_response(response: String, api_url: &str) -> Result<String, Strin
             } else {
                 Ok(format!("Error from BrowserTools: {}", api_response.message))
             }
-        },
+        }
         Err(e) => {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response) {
                 Ok(format_browser_tools_response(endpoint, json))
             } else {
-                Ok(format!("Raw response from BrowserTools (parse error: {}): {}", e, response))
+                Ok(format!(
+                    "Raw response from BrowserTools (parse error: {}): {}",
+                    e, response
+                ))
             }
         }
     }
 }
 
-fn call_browsertools_api(url: &str, method: &str, params: &serde_json::Value) -> Result<String, String> {
+fn call_browsertools_api(
+    url: &str,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<String, String> {
     let response = if method == "POST" {
         let json_string = serde_json::to_string(params)
             .map_err(|e| format!("JSON serialization error: {}", e))?;
@@ -327,36 +411,50 @@ fn format_browser_tools_response(endpoint: &str, data: serde_json::Value) -> Str
             if data.get("message").and_then(|v| v.as_str()).is_some() {
                 "Successfully saved screenshot".to_string()
             } else {
-                format!("Screenshot captured: {}", serde_json::to_string_pretty(&data).unwrap_or_default())
+                format!(
+                    "Screenshot captured: {}",
+                    serde_json::to_string_pretty(&data).unwrap_or_default()
+                )
             }
-        },
+        }
         "console-logs" | "console-errors" => format_console_logs(&data),
         "network-success" | "network-errors" => {
-            format!("Network logs:\n\n{}", serde_json::to_string_pretty(&data).unwrap_or_default())
-        },
-        "wipelogs" => {
-            data.get("message")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Browser logs cleared successfully.".to_string())
-        },
+            format!(
+                "Network logs:\n\n{}",
+                serde_json::to_string_pretty(&data).unwrap_or_default()
+            )
+        }
+        "wipelogs" => data
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Browser logs cleared successfully.".to_string()),
         "selected-element" => format_selected_element(&data),
-        "accessibility-audit" | "performance-audit" | "seo-audit" | "best-practices-audit" | "nextjs-audit" => {
-            format_audit_response(endpoint, &data)
-        },
+        "accessibility-audit"
+        | "performance-audit"
+        | "seo-audit"
+        | "best-practices-audit"
+        | "nextjs-audit" => format_audit_response(endpoint, &data),
         "audit-all" => {
-            format!("Audit Mode Results:\n\n{}", serde_json::to_string_pretty(&data).unwrap_or_default())
-        },
+            format!(
+                "Audit Mode Results:\n\n{}",
+                serde_json::to_string_pretty(&data).unwrap_or_default()
+            )
+        }
         "debug-mode" => {
-            format!("Debugger Mode Results:\n\n{}", serde_json::to_string_pretty(&data).unwrap_or_default())
-        },
-        _ => serde_json::to_string_pretty(&data).unwrap_or_default()
+            format!(
+                "Debugger Mode Results:\n\n{}",
+                serde_json::to_string_pretty(&data).unwrap_or_default()
+            )
+        }
+        _ => serde_json::to_string_pretty(&data).unwrap_or_default(),
     }
 }
 
 fn format_console_logs(data: &serde_json::Value) -> String {
     if let Some(logs) = data.as_array() {
-        let formatted_logs = logs.iter()
+        let formatted_logs = logs
+            .iter()
             .map(|log| {
                 let level = log.get("level").and_then(|v| v.as_str()).unwrap_or("info");
                 let message = log.get("message").and_then(|v| v.as_str()).unwrap_or("");
@@ -371,16 +469,28 @@ fn format_console_logs(data: &serde_json::Value) -> String {
             format!("Console Logs:\n\n{}", formatted_logs)
         }
     } else {
-        format!("Console logs: {}", serde_json::to_string_pretty(data).unwrap_or_default())
+        format!(
+            "Console logs: {}",
+            serde_json::to_string_pretty(data).unwrap_or_default()
+        )
     }
 }
 
 fn format_selected_element(data: &serde_json::Value) -> String {
     if let Some(element) = data.get("element") {
-        let tag_name = element.get("tagName").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let class_name = element.get("className").and_then(|v| v.as_str()).unwrap_or("");
+        let tag_name = element
+            .get("tagName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let class_name = element
+            .get("className")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let id = element.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let text = element.get("innerText").and_then(|v| v.as_str()).unwrap_or("");
+        let text = element
+            .get("innerText")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         let mut element_info = format!("Selected DOM Element:\n- Tag: {}", tag_name);
 
@@ -413,11 +523,12 @@ fn format_audit_response(endpoint: &str, data: &serde_json::Value) -> String {
         "seo-audit" => "SEO",
         "best-practices-audit" => "Best Practices",
         "nextjs-audit" => "NextJS",
-        _ => "Unknown"
+        _ => "Unknown",
     };
 
     // Try to extract score
-    let score = data.get("score")
+    let score = data
+        .get("score")
         .and_then(|v| v.as_f64())
         .map(|score| {
             let score_percentage = (score * 100.0).round() as i32;
@@ -433,8 +544,14 @@ fn format_audit_response(endpoint: &str, data: &serde_json::Value) -> String {
             let mut issues_text = "\nIssues Found:\n".to_string();
 
             for (i, issue) in issues.iter().enumerate() {
-                let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown issue");
-                let description = issue.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let title = issue
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown issue");
+                let description = issue
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
                 issues_text.push_str(&format!("\n{}. {}\n", i + 1, title));
                 if !description.is_empty() {
@@ -453,7 +570,11 @@ fn format_audit_response(endpoint: &str, data: &serde_json::Value) -> String {
         format!("{} Audit Results:\n\n{}{}", audit_type, score, issues)
     } else {
         // Fall back to raw JSON if we couldn't extract structured data
-        format!("{} Audit Results:\n\n{}", audit_type, serde_json::to_string_pretty(data).unwrap_or_default())
+        format!(
+            "{} Audit Results:\n\n{}",
+            audit_type,
+            serde_json::to_string_pretty(data).unwrap_or_default()
+        )
     }
 }
 

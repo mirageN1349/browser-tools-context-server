@@ -1,0 +1,6 @@
+{
+  /// Port to use (Default: 3025, Optional)
+  // "port": 3025
+  /// Host to bind to (Default: 127.0.0.1, Optional)
+  // "host": "127.0.0.1"
+}
