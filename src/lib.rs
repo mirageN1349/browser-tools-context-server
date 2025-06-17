@@ -9,7 +9,8 @@ use zed_extension_api::{
 
 const DEFAULT_PORT: u16 = 3025;
 const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_BROWSERTOOLS_NPX_COMMAND: &str = "@agentdeskai/browser-tools-server@1.2.0";
+const DEFAULT_BROWSERTOOLS_SERVER_COMMAND: &str = "npx";
+const DEFAULT_BROWSERTOOLS_SERVER_ARGS: [&str; 1] = ["@agentdeskai/browser-tools-server@1.2.0"];
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BrowserToolsSettings {
@@ -17,8 +18,11 @@ struct BrowserToolsSettings {
     port: u16,
     #[serde(default = "default_host")]
     host: String,
-    #[serde(default = "default_npx_command")]
-    npx_command: String,
+    npx_command: Option<String>,
+    #[serde(default = "default_browsertools_server_command")]
+    server_command: String,
+    #[serde(default = "default_browsertools_server_args")]
+    server_args: Vec<String>,
 }
 
 fn default_port() -> u16 {
@@ -29,8 +33,14 @@ fn default_host() -> String {
     DEFAULT_HOST.to_string()
 }
 
-fn default_npx_command() -> String {
-    DEFAULT_BROWSERTOOLS_NPX_COMMAND.to_string()
+fn default_browsertools_server_command() -> String {
+    DEFAULT_BROWSERTOOLS_SERVER_COMMAND.to_string()
+}
+
+fn default_browsertools_server_args() -> Vec<String> {
+    DEFAULT_BROWSERTOOLS_SERVER_ARGS
+        .map(|arg| arg.to_string())
+        .to_vec()
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,15 +55,17 @@ struct ApiResponse {
 struct BrowserToolsExtension {
     port: u16,
     host: String,
-    npx_command: String,
+    server_command: String,
+    server_args: Vec<String>,
 }
 
 impl zed::Extension for BrowserToolsExtension {
     fn new() -> Self {
         Self {
-            port: DEFAULT_PORT,
-            host: DEFAULT_HOST.to_string(),
-            npx_command: DEFAULT_BROWSERTOOLS_NPX_COMMAND.to_string(),
+            port: default_port(),
+            host: default_host(),
+            server_command: default_browsertools_server_command(),
+            server_args: default_browsertools_server_args(),
         }
     }
 
@@ -69,19 +81,28 @@ impl zed::Extension for BrowserToolsExtension {
             serde_json::from_value(settings).unwrap_or_else(|_| BrowserToolsSettings {
                 port: default_port(),
                 host: default_host(),
-                npx_command: default_npx_command(),
+                npx_command: None,
+                server_command: default_browsertools_server_command(),
+                server_args: default_browsertools_server_args(),
             });
 
         self.port = settings.port;
-        self.host = settings.host.clone();
-        self.npx_command = settings.npx_command.clone();
+        self.host = settings.host;
+        self.server_args = match settings.npx_command {
+            Some(command) => {
+                println!("Deprecated: use server_args and server_command instead of npx_command");
+                vec![command]
+            }
+            _ => settings.server_args,
+        };
+        self.server_command = settings.server_command;
 
         Ok(Command {
-            command: "npx".to_string(),
-            args: vec![settings.npx_command],
+            command: self.server_command.clone(),
+            args: self.server_args.clone(),
             env: vec![
-                ("PORT".into(), settings.port.to_string()),
-                ("HOST".into(), settings.host),
+                ("PORT".into(), self.port.to_string()),
+                ("HOST".into(), self.host.clone()),
             ],
         })
     }
