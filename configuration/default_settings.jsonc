@@ -3,4 +3,8 @@
   // "port": 3025
   /// Host to bind to (Default: 127.0.0.1, Optional)
   // "host": "127.0.0.1"
+  /// Command to start the server (Default: npx, Optional)
+  // "server_command": "npx"
+  /// Arguments for the server command (Default: [@agentdeskai/browser-tools-server@1.2.0], Optional)
+  // "server_args": ["@agentdeskai/browser-tools-server@1.2.0"]
 }
