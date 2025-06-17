@@ -49,14 +49,16 @@ Add the following to your Zed settings.json:
     "browser-tools-context-server": {
       "settings": {
         "port": 3025,
-        "host": "127.0.0.1"
+        "host": "127.0.0.1",
+        "server_command": "npx",
+        "server_args": ["@agentdeskai/browser-tools-server@1.2.0"]
       }
     }
   }
 }
 ```
 
-You can customize the port and host if needed.
+You can customize the port, host, server command and args if needed.
 
 ## Setup Browser Extension
 
