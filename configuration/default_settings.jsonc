@@ -1,10 +1,10 @@
 {
-  /// Port to use (Default: 3025, Optional)
+  /// Port for the browser-tools-server connection (Default: 3025)
   // "port": 3025
-  /// Host to bind to (Default: 127.0.0.1, Optional)
+  /// Host for the browser-tools-server connection (Default: 127.0.0.1)
   // "host": "127.0.0.1"
-  /// Command to start the server (Default: npx, Optional)
-  // "server_command": "npx"
-  /// Arguments for the server command (Default: [@agentdeskai/browser-tools-server@1.2.0], Optional)
-  // "server_args": ["@agentdeskai/browser-tools-server@1.2.0"]
+  /// Command to start the MCP server (Default: node)
+  // "server_command": "node"
+  /// Arguments for the server command (Default: uses built-in wrapper script)
+  // "server_args": ["-e", "..."]
 }

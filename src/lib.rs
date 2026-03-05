@@ -7,21 +7,24 @@ use zed_extension_api::{
     SlashCommandOutputSection, Worktree,
 };
 
+const MCP_PACKAGE: &str = "@agentdeskai/browser-tools-mcp";
+const PACKAGE_VERSION: &str = "1.2.1";
 const DEFAULT_PORT: u16 = 3025;
 const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_BROWSERTOOLS_SERVER_COMMAND: &str = "npx";
-const DEFAULT_BROWSERTOOLS_SERVER_ARGS: [&str; 1] = ["@agentdeskai/browser-tools-server@1.2.0"];
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BrowserToolsSettings {
+    /// Port for the browser-tools-server (default: 3025)
     #[serde(default = "default_port")]
     port: u16,
+    /// Host for the browser-tools-server (default: 127.0.0.1)
     #[serde(default = "default_host")]
     host: String,
-    npx_command: Option<String>,
-    #[serde(default = "default_browsertools_server_command")]
+    /// Override the server command (default: npx)
+    #[serde(default = "default_server_command")]
     server_command: String,
-    #[serde(default = "default_browsertools_server_args")]
+    /// Override the server arguments (default: [@agentdeskai/browser-tools-mcp@<version>])
+    #[serde(default = "default_server_args")]
     server_args: Vec<String>,
 }
 
@@ -33,39 +36,38 @@ fn default_host() -> String {
     DEFAULT_HOST.to_string()
 }
 
-fn default_browsertools_server_command() -> String {
-    DEFAULT_BROWSERTOOLS_SERVER_COMMAND.to_string()
+fn default_server_command() -> String {
+    "/bin/sh".to_string()
 }
 
-fn default_browsertools_server_args() -> Vec<String> {
-    DEFAULT_BROWSERTOOLS_SERVER_ARGS
-        .map(|arg| arg.to_string())
-        .to_vec()
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiResponse {
-    status: String,
-    #[serde(default)]
-    data: serde_json::Value,
-    #[serde(default)]
-    message: String,
+fn default_server_args() -> Vec<String> {
+    // Uses /bin/sh to detect user's $SHELL, then launches it as login shell
+    // with the appropriate rc file sourced (for node version managers like
+    // nvm, fnm, proto, volta that modify PATH in shell configs).
+    // grep --line-buffered filters stdout to only pass JSON-RPC messages
+    // (browser-tools-mcp writes debug messages to stdout, breaking MCP protocol).
+    let npx_cmd = format!(
+        "exec npx -y {}@{} | grep --line-buffered '^{{'",
+        MCP_PACKAGE, PACKAGE_VERSION
+    );
+    vec![
+        "-c".to_string(),
+        format!(
+            r#"S="${{SHELL:-/bin/sh}}"; case "$S" in */zsh) exec "$S" -l -c "source ~/.zshrc 2>/dev/null; {npx_cmd}";; */bash) exec "$S" -l -c "source ~/.bashrc 2>/dev/null; {npx_cmd}";; *) exec "$S" -l -c "{npx_cmd}";; esac"#
+        ),
+    ]
 }
 
 struct BrowserToolsExtension {
     port: u16,
     host: String,
-    server_command: String,
-    server_args: Vec<String>,
 }
 
 impl zed::Extension for BrowserToolsExtension {
     fn new() -> Self {
         Self {
-            port: default_port(),
-            host: default_host(),
-            server_command: default_browsertools_server_command(),
-            server_args: default_browsertools_server_args(),
+            port: DEFAULT_PORT,
+            host: DEFAULT_HOST.to_string(),
         }
     }
 
@@ -75,34 +77,25 @@ impl zed::Extension for BrowserToolsExtension {
         project: &Project,
     ) -> Result<Command> {
         let settings = ContextServerSettings::for_project("browser-tools-context-server", project)?;
-        let settings = settings.settings.unwrap_or_else(|| serde_json::json!({}));
+        let settings_value = settings.settings.unwrap_or_else(|| serde_json::json!({}));
 
         let settings: BrowserToolsSettings =
-            serde_json::from_value(settings).unwrap_or_else(|_| BrowserToolsSettings {
+            serde_json::from_value(settings_value).unwrap_or_else(|_| BrowserToolsSettings {
                 port: default_port(),
                 host: default_host(),
-                npx_command: None,
-                server_command: default_browsertools_server_command(),
-                server_args: default_browsertools_server_args(),
+                server_command: default_server_command(),
+                server_args: default_server_args(),
             });
 
         self.port = settings.port;
-        self.host = settings.host;
-        self.server_args = match settings.npx_command {
-            Some(command) => {
-                println!("Deprecated: use server_args and server_command instead of npx_command");
-                vec![command]
-            }
-            _ => settings.server_args,
-        };
-        self.server_command = settings.server_command;
+        self.host = settings.host.clone();
 
         Ok(Command {
-            command: self.server_command.clone(),
-            args: self.server_args.clone(),
+            command: settings.server_command,
+            args: settings.server_args,
             env: vec![
-                ("PORT".into(), self.port.to_string()),
-                ("HOST".into(), self.host.clone()),
+                ("PORT".into(), settings.port.to_string()),
+                ("HOST".into(), settings.host),
             ],
         })
     }
@@ -132,23 +125,23 @@ impl zed::Extension for BrowserToolsExtension {
     ) -> Result<Vec<SlashCommandArgumentCompletion>, String> {
         match command.name.as_str() {
             "browser-capture" => Ok(vec![
-                create_completion("Screenshot", "screenshot"),
-                create_completion("Console Logs", "logs"),
-                create_completion("Console Errors", "errors"),
-                create_completion("Network Logs", "network"),
-                create_completion("Network Errors", "network-errors"),
-                create_completion("Clear Logs", "clear"),
-                create_completion("DOM Element", "element"),
+                completion("Screenshot", "screenshot"),
+                completion("Console Logs", "logs"),
+                completion("Console Errors", "errors"),
+                completion("Network Logs", "network"),
+                completion("Network Errors", "network-errors"),
+                completion("Clear Logs", "clear"),
+                completion("DOM Element", "element"),
             ]),
             "browser-audit" => Ok(vec![
-                create_completion("Accessibility", "accessibility"),
-                create_completion("Performance", "performance"),
-                create_completion("SEO", "seo"),
-                create_completion("Best Practices", "best-practices"),
-                create_completion("NextJS", "nextjs"),
-                create_completion("Run All Audits", "all"),
+                completion("Accessibility", "accessibility"),
+                completion("Performance", "performance"),
+                completion("SEO", "seo"),
+                completion("Best Practices", "best-practices"),
+                completion("NextJS", "nextjs"),
+                completion("Run All Audits", "all"),
             ]),
-            "browser-debug" => Ok(vec![create_completion("Start Debugger Mode", "start")]),
+            "browser-debug" => Ok(vec![completion("Start Debugger Mode", "start")]),
             command => Err(format!("unknown slash command: \"{command}\"")),
         }
     }
@@ -159,154 +152,89 @@ impl zed::Extension for BrowserToolsExtension {
         args: Vec<String>,
         _worktree: Option<&Worktree>,
     ) -> Result<SlashCommandOutput, String> {
-        let command_name = command.name.as_str();
         let arg = args.first().map(|s| s.as_str()).unwrap_or("");
-
         if arg.is_empty() {
             return Err("No argument provided. Please select an option.".to_string());
         }
 
-        let (api_endpoint, method, api_params) = get_api_params(command_name, arg)?;
-        let api_url = format!("http://{}:{}/{}", self.host, self.port, api_endpoint);
-        let result_text = process_api_request(&api_url, &method, api_params, command_name, arg)?;
-        let section_label = get_section_label(command_name, arg);
+        let (endpoint, method, body) = resolve_api_call(command.name.as_str(), arg)?;
+        let url = format!("http://{}:{}/{}", self.host, self.port, endpoint);
+        let text = execute_request(&url, &method, body, command.name.as_str(), arg)?;
+        let label = section_label(command.name.as_str(), arg);
 
         Ok(SlashCommandOutput {
             sections: vec![SlashCommandOutputSection {
-                range: (0..result_text.len()).into(),
-                label: section_label.to_string(),
+                range: (0..text.len()).into(),
+                label: label.to_string(),
             }],
-            text: result_text,
+            text,
         })
     }
 }
 
-fn create_completion(label: &str, command: &str) -> SlashCommandArgumentCompletion {
+fn completion(label: &str, value: &str) -> SlashCommandArgumentCompletion {
     SlashCommandArgumentCompletion {
         label: label.to_string(),
-        new_text: command.to_string(),
+        new_text: value.to_string(),
         run_command: true,
     }
 }
 
-fn get_current_timestamp() -> i64 {
+fn timestamp_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
 }
 
-fn get_api_params(
-    command_name: &str,
+fn resolve_api_call(
+    cmd: &str,
     arg: &str,
 ) -> Result<(String, String, serde_json::Value), String> {
-    let timestamp = get_current_timestamp();
+    let ts = timestamp_millis();
+    let post = "POST".to_string();
+    let get = "GET".to_string();
+    let empty = serde_json::json!({});
 
-    match (command_name, arg) {
-        ("browser-capture", "screenshot") => Ok((
-            "capture-screenshot".to_string(),
-            "POST".to_string(),
-            serde_json::json!({}),
-        )),
-        ("browser-capture", "logs") => Ok((
-            "console-logs".to_string(),
-            "GET".to_string(),
-            serde_json::json!({}),
-        )),
-        ("browser-capture", "errors") => Ok((
-            "console-errors".to_string(),
-            "GET".to_string(),
-            serde_json::json!({}),
-        )),
-        ("browser-capture", "network") => Ok((
-            "network-success".to_string(),
-            "GET".to_string(),
-            serde_json::json!({}),
-        )),
-        ("browser-capture", "network-errors") => Ok((
-            "network-errors".to_string(),
-            "GET".to_string(),
-            serde_json::json!({}),
-        )),
-        ("browser-capture", "clear") => Ok((
-            "wipelogs".to_string(),
-            "POST".to_string(),
-            serde_json::json!({}),
-        )),
-        ("browser-capture", "element") => Ok((
-            "selected-element".to_string(),
-            "GET".to_string(),
-            serde_json::json!({}),
-        )),
+    match (cmd, arg) {
+        ("browser-capture", "screenshot") => Ok(("capture-screenshot".into(), post, empty)),
+        ("browser-capture", "logs") => Ok(("console-logs".into(), get, empty)),
+        ("browser-capture", "errors") => Ok(("console-errors".into(), get, empty)),
+        ("browser-capture", "network") => Ok(("network-success".into(), get, empty)),
+        ("browser-capture", "network-errors") => Ok(("network-errors".into(), get, empty)),
+        ("browser-capture", "clear") => Ok(("wipelogs".into(), post, empty)),
+        ("browser-capture", "element") => Ok(("selected-element".into(), get, empty)),
 
-        ("browser-audit", "accessibility") => Ok((
-            "accessibility-audit".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "category": "accessibility",
+        ("browser-audit", audit) => {
+            let endpoint = match audit {
+                "accessibility" => "accessibility-audit",
+                "performance" => "performance-audit",
+                "seo" => "seo-audit",
+                "best-practices" => "best-practices-audit",
+                "nextjs" => "nextjs-audit",
+                "all" => "audit-all",
+                _ => return Err(format!("Unknown audit type: {audit}")),
+            };
+            let body = serde_json::json!({
+                "category": audit,
                 "source": "zed_extension",
-                "timestamp": timestamp
-            }),
-        )),
-        ("browser-audit", "performance") => Ok((
-            "performance-audit".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "category": "performance",
-                "source": "zed_extension",
-                "timestamp": timestamp
-            }),
-        )),
-        ("browser-audit", "seo") => Ok((
-            "seo-audit".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "category": "seo",
-                "source": "zed_extension",
-                "timestamp": timestamp
-            }),
-        )),
-        ("browser-audit", "best-practices") => Ok((
-            "best-practices-audit".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "category": "best-practices",
-                "source": "zed_extension",
-                "timestamp": timestamp
-            }),
-        )),
-        ("browser-audit", "nextjs") => Ok((
-            "nextjs-audit".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "source": "zed_extension",
-                "timestamp": timestamp
-            }),
-        )),
-        ("browser-audit", "all") => Ok((
-            "audit-all".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "source": "zed_extension",
-                "timestamp": timestamp
-            }),
-        )),
+                "timestamp": ts
+            });
+            Ok((endpoint.into(), post, body))
+        }
 
         ("browser-debug", "start") => Ok((
-            "debug-mode".to_string(),
-            "POST".to_string(),
-            serde_json::json!({
-                "source": "zed_extension",
-                "timestamp": timestamp
-            }),
+            "debug-mode".into(),
+            post,
+            serde_json::json!({ "source": "zed_extension", "timestamp": ts }),
         )),
 
-        (command, arg) => Err(format!("Unknown command or argument: {command} {arg}")),
+        _ => Err(format!("Unknown command: {cmd} {arg}")),
     }
 }
 
-fn get_section_label<'a>(command_name: &'a str, arg: &'a str) -> &'a str {
-    match (command_name, arg) {
+fn section_label<'a>(cmd: &'a str, arg: &'a str) -> &'a str {
+    match (cmd, arg) {
         ("browser-capture", "screenshot") => "Browser Screenshot",
         ("browser-capture", "logs") => "Browser Console Logs",
         ("browser-capture", "errors") => "Browser Console Errors",
@@ -325,108 +253,93 @@ fn get_section_label<'a>(command_name: &'a str, arg: &'a str) -> &'a str {
     }
 }
 
-fn process_api_request(
-    api_url: &str,
-    method: &str,
-    api_params: serde_json::Value,
-    command_name: &str,
-    arg: &str,
-) -> Result<String, String> {
-    match call_browsertools_api(api_url, method, &api_params) {
-        Ok(response) => process_api_response(response, api_url),
-        Err(e) => {
-            let message = get_error_message(command_name, arg);
-            Err(format!("{} Error: {}", message, e))
-        }
-    }
-}
-
-fn get_error_message(command_name: &str, arg: &str) -> String {
-    match (command_name, arg) {
-        ("browser-capture", "screenshot") =>
-            "Failed to capture screenshot. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-capture", "logs") =>
-            "Failed to retrieve console logs. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-capture", "errors") =>
-            "Failed to retrieve console errors. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-capture", "network") =>
-            "Failed to retrieve network logs. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-capture", "network-errors") =>
-            "Failed to retrieve network errors. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-capture", "clear") =>
-            "Failed to clear logs. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-capture", "element") =>
-            "Failed to get DOM element. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-audit", _) =>
-            "Failed to run audit. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        ("browser-debug", _) =>
-            "Failed to start debugger. Make sure BrowserTools extension is running in Chrome.".to_string(),
-        _ => "Unknown command".to_string()
-    }
-}
-
-fn process_api_response(response: String, api_url: &str) -> Result<String, String> {
-    let endpoint = api_url.split('/').last().unwrap_or("");
-
-    match serde_json::from_str::<ApiResponse>(&response) {
-        Ok(api_response) => {
-            if api_response.status == "success" {
-                Ok(format_browser_tools_response(endpoint, api_response.data))
-            } else {
-                Ok(format!("Error from BrowserTools: {}", api_response.message))
-            }
-        }
-        Err(e) => {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response) {
-                Ok(format_browser_tools_response(endpoint, json))
-            } else {
-                Ok(format!(
-                    "Raw response from BrowserTools (parse error: {}): {}",
-                    e, response
-                ))
-            }
-        }
-    }
-}
-
-fn call_browsertools_api(
+fn execute_request(
     url: &str,
     method: &str,
-    params: &serde_json::Value,
+    body: serde_json::Value,
+    cmd: &str,
+    arg: &str,
 ) -> Result<String, String> {
-    let response = if method == "POST" {
-        let json_string = serde_json::to_string(params)
-            .map_err(|e| format!("JSON serialization error: {}", e))?;
+    match http_call(url, method, &body) {
+        Ok(response) => parse_response(&response, url),
+        Err(e) => {
+            let action = match cmd {
+                "browser-capture" => match arg {
+                    "screenshot" => "capture screenshot",
+                    "logs" => "retrieve console logs",
+                    "errors" => "retrieve console errors",
+                    "network" | "network-errors" => "retrieve network logs",
+                    "clear" => "clear logs",
+                    "element" => "get DOM element",
+                    _ => "execute command",
+                },
+                "browser-audit" => "run audit",
+                "browser-debug" => "start debugger",
+                _ => "execute command",
+            };
+            Err(format!(
+                "Failed to {}. Make sure BrowserTools Chrome extension is running. Error: {}",
+                action, e
+            ))
+        }
+    }
+}
 
-        let request = http_client::HttpRequest::builder()
+fn http_call(url: &str, method: &str, body: &serde_json::Value) -> Result<String, String> {
+    let request = if method == "POST" {
+        let json = serde_json::to_string(body)
+            .map_err(|e| format!("JSON serialization error: {}", e))?;
+        http_client::HttpRequest::builder()
             .method(http_client::HttpMethod::Post)
             .url(url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            .body(json_string.into_bytes())
+            .body(json.into_bytes())
             .build()
-            .map_err(|e| format!("Failed to build request: {}", e))?;
-
-        request.fetch()
     } else {
-        let request = http_client::HttpRequest::builder()
+        http_client::HttpRequest::builder()
             .method(http_client::HttpMethod::Get)
             .url(url)
             .header("Accept", "application/json")
             .build()
-            .map_err(|e| format!("Failed to build request: {}", e))?;
-
-        request.fetch()
     };
 
-    match response {
-        Ok(response) => String::from_utf8(response.body)
-            .map_err(|e| format!("Failed to convert response body to UTF-8: {}", e)),
-        Err(e) => Err(format!("HTTP request failed: {}", e)),
-    }
+    let response = request
+        .map_err(|e| format!("Failed to build request: {}", e))?
+        .fetch()
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    String::from_utf8(response.body)
+        .map_err(|e| format!("Invalid UTF-8 in response: {}", e))
 }
 
-fn format_browser_tools_response(endpoint: &str, data: serde_json::Value) -> String {
+#[derive(Debug, Deserialize)]
+struct ApiResponse {
+    status: String,
+    #[serde(default)]
+    data: serde_json::Value,
+    #[serde(default)]
+    message: String,
+}
+
+fn parse_response(raw: &str, url: &str) -> Result<String, String> {
+    let endpoint = url.rsplit('/').next().unwrap_or("");
+
+    if let Ok(api) = serde_json::from_str::<ApiResponse>(raw) {
+        if api.status == "success" {
+            return Ok(format_response(endpoint, api.data));
+        }
+        return Ok(format!("Error from BrowserTools: {}", api.message));
+    }
+
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(raw) {
+        return Ok(format_response(endpoint, json));
+    }
+
+    Ok(format!("Raw response from BrowserTools: {}", raw))
+}
+
+fn format_response(endpoint: &str, data: serde_json::Value) -> String {
     match endpoint {
         "capture-screenshot" => {
             if data.get("message").and_then(|v| v.as_str()).is_some() {
@@ -451,93 +364,69 @@ fn format_browser_tools_response(endpoint: &str, data: serde_json::Value) -> Str
             .map(|s| s.to_string())
             .unwrap_or_else(|| "Browser logs cleared successfully.".to_string()),
         "selected-element" => format_selected_element(&data),
-        "accessibility-audit"
-        | "performance-audit"
-        | "seo-audit"
-        | "best-practices-audit"
-        | "nextjs-audit" => format_audit_response(endpoint, &data),
-        "audit-all" => {
-            format!(
-                "Audit Mode Results:\n\n{}",
-                serde_json::to_string_pretty(&data).unwrap_or_default()
-            )
-        }
-        "debug-mode" => {
-            format!(
-                "Debugger Mode Results:\n\n{}",
-                serde_json::to_string_pretty(&data).unwrap_or_default()
-            )
-        }
+        ep if ep.ends_with("-audit") => format_audit(ep, &data),
+        "audit-all" => format!(
+            "Audit Mode Results:\n\n{}",
+            serde_json::to_string_pretty(&data).unwrap_or_default()
+        ),
+        "debug-mode" => format!(
+            "Debugger Mode Results:\n\n{}",
+            serde_json::to_string_pretty(&data).unwrap_or_default()
+        ),
         _ => serde_json::to_string_pretty(&data).unwrap_or_default(),
     }
 }
 
 fn format_console_logs(data: &serde_json::Value) -> String {
-    if let Some(logs) = data.as_array() {
-        let formatted_logs = logs
-            .iter()
-            .map(|log| {
-                let level = log.get("level").and_then(|v| v.as_str()).unwrap_or("info");
-                let message = log.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                format!("[{}] {}", level.to_uppercase(), message)
-            })
-            .collect::<Vec<String>>()
-            .join("\n");
-
-        if formatted_logs.is_empty() {
-            "No console logs found.".to_string()
-        } else {
-            format!("Console Logs:\n\n{}", formatted_logs)
-        }
-    } else {
-        format!(
+    let Some(logs) = data.as_array() else {
+        return format!(
             "Console logs: {}",
             serde_json::to_string_pretty(data).unwrap_or_default()
-        )
+        );
+    };
+
+    if logs.is_empty() {
+        return "No console logs found.".to_string();
     }
+
+    let formatted: Vec<String> = logs
+        .iter()
+        .map(|log| {
+            let level = log.get("level").and_then(|v| v.as_str()).unwrap_or("info");
+            let message = log.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            format!("[{}] {}", level.to_uppercase(), message)
+        })
+        .collect();
+
+    format!("Console Logs:\n\n{}", formatted.join("\n"))
 }
 
 fn format_selected_element(data: &serde_json::Value) -> String {
-    if let Some(element) = data.get("element") {
-        let tag_name = element
-            .get("tagName")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let class_name = element
-            .get("className")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let id = element.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let text = element
-            .get("innerText")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+    let Some(element) = data.get("element") else {
+        return "No DOM element selected. Click on an element in the browser to select it."
+            .to_string();
+    };
 
-        let mut element_info = format!("Selected DOM Element:\n- Tag: {}", tag_name);
+    let tag = element.get("tagName").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let mut info = format!("Selected DOM Element:\n- Tag: {}", tag);
 
-        if !id.is_empty() {
-            element_info.push_str(&format!("\n- ID: {}", id));
-        }
-
-        if !class_name.is_empty() {
-            element_info.push_str(&format!("\n- Classes: {}", class_name));
-        }
-
-        if !text.is_empty() {
-            element_info.push_str(&format!("\n- Text: {}", text));
-        }
-
-        if let Some(html) = element.get("outerHTML").and_then(|v| v.as_str()) {
-            element_info.push_str(&format!("\n\nHTML:\n{}", html));
-        }
-
-        element_info
-    } else {
-        "No DOM element selected. Click on an element in the browser to select it.".to_string()
+    if let Some(id) = element.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        info.push_str(&format!("\n- ID: {}", id));
     }
+    if let Some(cls) = element.get("className").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        info.push_str(&format!("\n- Classes: {}", cls));
+    }
+    if let Some(text) = element.get("innerText").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        info.push_str(&format!("\n- Text: {}", text));
+    }
+    if let Some(html) = element.get("outerHTML").and_then(|v| v.as_str()) {
+        info.push_str(&format!("\n\nHTML:\n{}", html));
+    }
+
+    info
 }
 
-fn format_audit_response(endpoint: &str, data: &serde_json::Value) -> String {
+fn format_audit(endpoint: &str, data: &serde_json::Value) -> String {
     let audit_type = match endpoint {
         "accessibility-audit" => "Accessibility",
         "performance-audit" => "Performance",
@@ -547,50 +436,32 @@ fn format_audit_response(endpoint: &str, data: &serde_json::Value) -> String {
         _ => "Unknown",
     };
 
-    // Try to extract score
     let score = data
         .get("score")
         .and_then(|v| v.as_f64())
-        .map(|score| {
-            let score_percentage = (score * 100.0).round() as i32;
-            format!("Overall Score: {}%\n", score_percentage)
-        })
+        .map(|s| format!("Overall Score: {}%\n", (s * 100.0).round() as i32))
         .unwrap_or_default();
 
-    // Try to extract issues
-    let issues = if let Some(issues) = data.get("issues").and_then(|v| v.as_array()) {
-        if issues.is_empty() {
-            "\nNo issues found!".to_string()
-        } else {
-            let mut issues_text = "\nIssues Found:\n".to_string();
-
+    let issues = match data.get("issues").and_then(|v| v.as_array()) {
+        Some(issues) if issues.is_empty() => "\nNo issues found!".to_string(),
+        Some(issues) => {
+            let mut text = "\nIssues Found:\n".to_string();
             for (i, issue) in issues.iter().enumerate() {
-                let title = issue
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown issue");
-                let description = issue
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
-                issues_text.push_str(&format!("\n{}. {}\n", i + 1, title));
-                if !description.is_empty() {
-                    issues_text.push_str(&format!("   {}\n", description));
+                let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown issue");
+                let desc = issue.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                text.push_str(&format!("\n{}. {}\n", i + 1, title));
+                if !desc.is_empty() {
+                    text.push_str(&format!("   {}\n", desc));
                 }
             }
-
-            issues_text
+            text
         }
-    } else {
-        String::new()
+        None => String::new(),
     };
 
-    // If we extracted structured data, format it nicely
     if !score.is_empty() || !issues.is_empty() {
         format!("{} Audit Results:\n\n{}{}", audit_type, score, issues)
     } else {
-        // Fall back to raw JSON if we couldn't extract structured data
         format!(
             "{} Audit Results:\n\n{}",
             audit_type,

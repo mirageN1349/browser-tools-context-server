@@ -11,13 +11,19 @@ This extension integrates BrowserTools MCP (Model Context Protocol) into Zed edi
 ## Prerequisites
 
 - [Zed Editor](https://zed.dev/)
-- [Rust](https://rustup.rs/) installed via rustup
-- [Node.js](https://nodejs.org/) (v14 or higher)
-- [BrowserTools Chrome Extension](https://github.com/AgentDeskAI/browser-tools-mcp/releases/download/v1.2.0/BrowserTools-1.2.0-extension.zip) installed in your Chrome browser
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [BrowserTools Chrome Extension](https://github.com/AgentDeskAI/browser-tools-mcp) installed in your Chrome browser
 
 ## Installation
 
-### Option 1: Install as a Development Extension
+### Option 1: Install from Zed Extensions Registry
+
+1. Open Zed Editor
+2. Navigate to Extensions
+3. Search for "BrowserTools Context Server"
+4. Click "Install"
+
+### Option 2: Install as a Development Extension
 
 1. Clone this repository:
 
@@ -30,18 +36,21 @@ This extension integrates BrowserTools MCP (Model Context Protocol) into Zed edi
 
 3. Navigate to Extensions
 
-4. Click "Install Dev Extension" and select the directory where you cloned this repository
+4. Click "Install Dev Extension" and select the cloned directory
 
-### Option 2: Install from Zed Extensions Registry (once published) Coming Soon
+## Setup
 
-1. Open Zed Editor
-2. Navigate to Extensions
-3. Search for "BrowserTools Context Server"
-4. Click "Install"
+1. Install the [BrowserTools Chrome Extension](https://github.com/AgentDeskAI/browser-tools-mcp)
+2. Open Chrome with the extension enabled
+3. Start the browser-tools-server:
+   ```
+   npx @agentdeskai/browser-tools-server@1.2.1
+   ```
+4. The MCP server starts automatically when the extension activates in Zed
 
 ## Configuration
 
-Add the following to your Zed settings.json:
+Add the following to your Zed settings.json to customize:
 
 ```json
 {
@@ -49,22 +58,12 @@ Add the following to your Zed settings.json:
     "browser-tools-context-server": {
       "settings": {
         "port": 3025,
-        "host": "127.0.0.1",
-        "server_command": "npx",
-        "server_args": ["@agentdeskai/browser-tools-server@1.2.0"]
+        "host": "127.0.0.1"
       }
     }
   }
 }
 ```
-
-You can customize the port, host, server command and args if needed.
-
-## Setup Browser Extension
-
-1. Download the [BrowserTools Chrome Extension](https://github.com/AgentDeskAI/browser-tools-mcp/)
-2. Install in Chrome by navigating to chrome://extensions, enabling "Developer mode", and clicking "Load unpacked"
-3. Select the unzipped extension folder
 
 ## Usage
 
@@ -72,12 +71,8 @@ After installing the extension and the Chrome extension:
 
 1. Open Chrome with the BrowserTools extension enabled
 2. Open Zed and ensure the BrowserTools Context Server extension is activated
-3. Run the following command in your terminal to start the server manually:
-   ```
-   npx @agentdeskai/browser-tools-server@1.2.0
-   ```
-4. Open the Assistant in Zed
-5. Use any of the following slash commands:
+3. Open the Assistant in Zed
+4. Use any of the following slash commands:
 
 ### Available Slash Commands
 
@@ -100,28 +95,22 @@ After installing the extension and the Chrome extension:
 
 ## How It Works
 
-This extension:
+This extension uses a three-component architecture:
 
-1. Integrates with Zed's context server system to launch the BrowserTools MCP server
-2. Automatically installs required npm packages (@agentdeskai/browser-tools-mcp and @agentdeskai/browser-tools-server)
-3. Provides slash commands that communicate with the MCP server
-4. The MCP server communicates with the Chrome extension to capture and analyze browser data
+1. **Chrome Extension** monitors browser events, console logs, network requests, and captures screenshots
+2. **Browser Tools Server** (`browser-tools-server`) acts as middleware between the Chrome extension and the MCP server
+3. **MCP Server** (`browser-tools-mcp`) implements the Model Context Protocol, providing standardized tools that Zed can invoke
+
+The extension automatically launches the MCP server. The browser-tools-server must be started separately.
 
 ## Troubleshooting
 
 - Make sure the Chrome extension is installed and enabled
 - Check that your browser is running and the extension is active (you should see the BrowserTools icon in Chrome)
-- Verify that the ports in your configuration match those used by the Chrome extension
+- Verify that Node.js and npx are available in your PATH
+- If port 3025 is in use, configure a different port in settings
 - If you encounter issues, try restarting both Chrome and Zed
-
-## Development
-
-To modify this extension:
-
-1. Make changes to the source code
-2. Reinstall as a dev extension in Zed
-3. Test your changes
 
 ## License
 
-MIT
+Apache-2.0
