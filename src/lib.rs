@@ -2,15 +2,23 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use zed::settings::ContextServerSettings;
 use zed_extension_api::{
-    self as zed, http_client, serde_json, Command, ContextServerConfiguration, ContextServerId,
-    Project, Result, SlashCommand, SlashCommandArgumentCompletion, SlashCommandOutput,
-    SlashCommandOutputSection, Worktree,
+    self as zed, http_client, node_binary_path, npm_install_package, serde_json, Command,
+    ContextServerConfiguration, ContextServerId, Project, Result, SlashCommand,
+    SlashCommandArgumentCompletion, SlashCommandOutput, SlashCommandOutputSection, Worktree,
 };
 
 const MCP_PACKAGE: &str = "@agentdeskai/browser-tools-mcp";
 const PACKAGE_VERSION: &str = "1.2.1";
+const MCP_ENTRYPOINT: &str = "node_modules/@agentdeskai/browser-tools-mcp/dist/mcp-server.js";
 const DEFAULT_PORT: u16 = 3025;
 const DEFAULT_HOST: &str = "127.0.0.1";
+const SUPPRESS_STDOUT_LOGS_NODE_OPTION: &str =
+    "--import=data:text/javascript,console.log%3D()%3D%3E%7B%7D";
+
+fn path_from_extension(path: &str) -> Result<String> {
+    let extension_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    Ok(extension_dir.join(path).to_string_lossy().into_owned())
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BrowserToolsSettings {
@@ -20,12 +28,10 @@ struct BrowserToolsSettings {
     /// Host for the browser-tools-server (default: 127.0.0.1)
     #[serde(default = "default_host")]
     host: String,
-    /// Override the server command (default: npx)
-    #[serde(default = "default_server_command")]
-    server_command: String,
-    /// Override the server arguments (default: [@agentdeskai/browser-tools-mcp@<version>])
-    #[serde(default = "default_server_args")]
-    server_args: Vec<String>,
+    /// Override the server command (default: Zed-managed Node.js)
+    server_command: Option<String>,
+    /// Override the server arguments
+    server_args: Option<Vec<String>>,
 }
 
 fn default_port() -> u16 {
@@ -34,28 +40,6 @@ fn default_port() -> u16 {
 
 fn default_host() -> String {
     DEFAULT_HOST.to_string()
-}
-
-fn default_server_command() -> String {
-    "/bin/sh".to_string()
-}
-
-fn default_server_args() -> Vec<String> {
-    // Uses /bin/sh to detect user's $SHELL, then launches it as login shell
-    // with the appropriate rc file sourced (for node version managers like
-    // nvm, fnm, proto, volta that modify PATH in shell configs).
-    // grep --line-buffered filters stdout to only pass JSON-RPC messages
-    // (browser-tools-mcp writes debug messages to stdout, breaking MCP protocol).
-    let npx_cmd = format!(
-        "exec npx -y {}@{} | grep --line-buffered '^{{'",
-        MCP_PACKAGE, PACKAGE_VERSION
-    );
-    vec![
-        "-c".to_string(),
-        format!(
-            r#"S="${{SHELL:-/bin/sh}}"; case "$S" in */zsh) exec "$S" -l -c "source ~/.zshrc 2>/dev/null; {npx_cmd}";; */bash) exec "$S" -l -c "source ~/.bashrc 2>/dev/null; {npx_cmd}";; *) exec "$S" -l -c "{npx_cmd}";; esac"#
-        ),
-    ]
 }
 
 struct BrowserToolsExtension {
@@ -83,20 +67,32 @@ impl zed::Extension for BrowserToolsExtension {
             serde_json::from_value(settings_value).unwrap_or_else(|_| BrowserToolsSettings {
                 port: default_port(),
                 host: default_host(),
-                server_command: default_server_command(),
-                server_args: default_server_args(),
+                server_command: None,
+                server_args: None,
             });
 
         self.port = settings.port;
         self.host = settings.host.clone();
+        let env = vec![
+            ("BROWSER_TOOLS_PORT".into(), settings.port.to_string()),
+            ("BROWSER_TOOLS_HOST".into(), settings.host),
+        ];
+
+        if let Some(command) = settings.server_command {
+            return Ok(Command {
+                command,
+                args: settings.server_args.unwrap_or_default(),
+                env,
+            });
+        }
+
+        npm_install_package(MCP_PACKAGE, PACKAGE_VERSION)?;
+        let mcp_entrypoint = path_from_extension(MCP_ENTRYPOINT)?;
 
         Ok(Command {
-            command: settings.server_command,
-            args: settings.server_args,
-            env: vec![
-                ("PORT".into(), settings.port.to_string()),
-                ("HOST".into(), settings.host),
-            ],
+            command: node_binary_path()?,
+            args: vec![SUPPRESS_STDOUT_LOGS_NODE_OPTION.to_string(), mcp_entrypoint],
+            env,
         })
     }
 
@@ -187,10 +183,7 @@ fn timestamp_millis() -> i64 {
         .as_millis() as i64
 }
 
-fn resolve_api_call(
-    cmd: &str,
-    arg: &str,
-) -> Result<(String, String, serde_json::Value), String> {
+fn resolve_api_call(cmd: &str, arg: &str) -> Result<(String, String, serde_json::Value), String> {
     let ts = timestamp_millis();
     let post = "POST".to_string();
     let get = "GET".to_string();
@@ -287,8 +280,8 @@ fn execute_request(
 
 fn http_call(url: &str, method: &str, body: &serde_json::Value) -> Result<String, String> {
     let request = if method == "POST" {
-        let json = serde_json::to_string(body)
-            .map_err(|e| format!("JSON serialization error: {}", e))?;
+        let json =
+            serde_json::to_string(body).map_err(|e| format!("JSON serialization error: {}", e))?;
         http_client::HttpRequest::builder()
             .method(http_client::HttpMethod::Post)
             .url(url)
@@ -309,8 +302,7 @@ fn http_call(url: &str, method: &str, body: &serde_json::Value) -> Result<String
         .fetch()
         .map_err(|e| format!("HTTP request failed: {}", e))?;
 
-    String::from_utf8(response.body)
-        .map_err(|e| format!("Invalid UTF-8 in response: {}", e))
+    String::from_utf8(response.body).map_err(|e| format!("Invalid UTF-8 in response: {}", e))
 }
 
 #[derive(Debug, Deserialize)]
@@ -407,16 +399,31 @@ fn format_selected_element(data: &serde_json::Value) -> String {
             .to_string();
     };
 
-    let tag = element.get("tagName").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let tag = element
+        .get("tagName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let mut info = format!("Selected DOM Element:\n- Tag: {}", tag);
 
-    if let Some(id) = element.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(id) = element
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
         info.push_str(&format!("\n- ID: {}", id));
     }
-    if let Some(cls) = element.get("className").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(cls) = element
+        .get("className")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
         info.push_str(&format!("\n- Classes: {}", cls));
     }
-    if let Some(text) = element.get("innerText").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(text) = element
+        .get("innerText")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
         info.push_str(&format!("\n- Text: {}", text));
     }
     if let Some(html) = element.get("outerHTML").and_then(|v| v.as_str()) {
@@ -447,8 +454,14 @@ fn format_audit(endpoint: &str, data: &serde_json::Value) -> String {
         Some(issues) => {
             let mut text = "\nIssues Found:\n".to_string();
             for (i, issue) in issues.iter().enumerate() {
-                let title = issue.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown issue");
-                let desc = issue.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let title = issue
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown issue");
+                let desc = issue
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 text.push_str(&format!("\n{}. {}\n", i + 1, title));
                 if !desc.is_empty() {
                     text.push_str(&format!("   {}\n", desc));

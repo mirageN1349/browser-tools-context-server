@@ -65,6 +65,10 @@ Add the following to your Zed settings.json to customize:
 }
 ```
 
+By default, the extension installs and runs the MCP server with Zed-managed
+Node.js. Set `server_command` and `server_args` only if you need a custom
+runtime.
+
 ## Usage
 
 After installing the extension and the Chrome extension:

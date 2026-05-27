@@ -17,5 +17,5 @@
 
 - Make sure Chrome is running with the BrowserTools extension enabled
 - Make sure browser-tools-server is running (`npx @agentdeskai/browser-tools-server@1.2.1`)
-- Check that Node.js and npx are available in your PATH
+- Check that Node.js is available. The MCP server uses Zed-managed Node.js by default.
 - If port 3025 is in use, configure a different port in settings

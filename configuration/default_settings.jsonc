@@ -3,8 +3,8 @@
   // "port": 3025
   /// Host for the browser-tools-server connection (Default: 127.0.0.1)
   // "host": "127.0.0.1"
-  /// Command to start the MCP server (Default: node)
-  // "server_command": "node"
-  /// Arguments for the server command (Default: uses built-in wrapper script)
-  // "server_args": ["-e", "..."]
+  /// Command to start the MCP server (Default: Zed-managed Node.js)
+  // "server_command": "/absolute/path/to/custom/command"
+  /// Arguments for the custom server command
+  // "server_args": []
 }
